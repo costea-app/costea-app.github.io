@@ -1,0 +1,417 @@
+@if (loading()) {
+  <mat-progress-bar mode="indeterminate" aria-label="Cargando costeo" />
+} @else if (loadError()) {
+  <div class="state" role="alert">
+    <mat-icon aria-hidden="true">error</mat-icon>
+    <h1>No pudimos abrir el costeo</h1>
+    <p>{{ loadError() }}</p>
+    <a mat-flat-button routerLink="/app">Volver a mis negocios</a>
+  </div>
+} @else if (business(); as b) {
+  @let r = result();
+  @let cur = currency();
+  <nav class="breadcrumb" aria-label="Ruta de navegación">
+    <a routerLink="/app">Mis negocios</a> › <a [routerLink]="['/app/negocios', b.id, 'productos']">{{ b.name }}</a>
+  </nav>
+  <div class="page-header">
+    <div class="page-header-text">
+      <h1>{{ isNew() ? 'Nuevo costeo' : 'Editar costeo' }}@if (product()?.name) {: {{ product()!.name }}}</h1>
+      <p>Avanza paso a paso. Puedes guardar en cualquier momento y completar lo que falte después.</p>
+    </div>
+    <div class="actions">
+      <button mat-flat-button type="button" (click)="save()" [disabled]="saving()"><mat-icon>save</mat-icon> Guardar</button>
+    </div>
+  </div>
+
+  @if (saveError()) {
+    <div class="notice notice-error" role="alert"><mat-icon aria-hidden="true">error</mat-icon><div>{{ saveError() }}</div></div>
+  }
+  @if (saving()) { <mat-progress-bar mode="indeterminate" aria-label="Guardando" /> }
+
+  <div class="wizard-layout">
+    <form [formGroup]="form" (ngSubmit)="save()" novalidate>
+      <mat-stepper [orientation]="vertical() ? 'vertical' : 'horizontal'" [linear]="false" labelPosition="bottom" #stepper>
+        <!-- ============ Paso 1: producto y tanda ============ -->
+        <mat-step [stepControl]="form.controls.info" label="Producto y tanda">
+          <div class="stack step-body" formGroupName="info">
+            <h2>¿Qué vas a costear?</h2>
+            <mat-form-field>
+              <mat-label>Nombre del producto</mat-label>
+              <input matInput formControlName="name" maxlength="120" required placeholder="Pan artesanal, vela de soya, aretes…" />
+              @if (form.controls.info.controls.name.invalid) { <mat-error>{{ err(form.controls.info.controls.name) }}</mat-error> }
+            </mat-form-field>
+            <mat-form-field>
+              <mat-label>Descripción (opcional)</mat-label>
+              <textarea matInput formControlName="description" rows="2" maxlength="1000"></textarea>
+            </mat-form-field>
+
+            <div>
+              <p id="modo-label"><strong>¿Cómo lo produces?</strong></p>
+              <mat-button-toggle-group formControlName="costingMode" aria-labelledby="modo-label">
+                <mat-button-toggle value="batch">En tandas (varias unidades a la vez)</mat-button-toggle>
+                <mat-button-toggle value="unit">Una unidad a la vez</mat-button-toggle>
+              </mat-button-toggle-group>
+            </div>
+
+            @if (isBatch()) {
+              <div class="row">
+                <mat-form-field>
+                  <mat-label>¿Cuántas unidades salen en total?</mat-label>
+                  <input matInput formControlName="unitsMade" inputmode="decimal" />
+                  <mat-hint>Opcional. Incluye las que salen dañadas o no se pueden vender.</mat-hint>
+                  @if (form.controls.info.controls.unitsMade.invalid) { <mat-error>{{ err(form.controls.info.controls.unitsMade) }}</mat-error> }
+                </mat-form-field>
+                <mat-form-field>
+                  <mat-label>¿Cuántas unidades puedes vender?</mat-label>
+                  <input matInput formControlName="sellableUnits" inputmode="decimal" required />
+                  <mat-hint>Las que realmente vas a vender de esta tanda.</mat-hint>
+                  @if (form.controls.info.controls.sellableUnits.invalid) { <mat-error>{{ err(form.controls.info.controls.sellableUnits) }}</mat-error> }
+                </mat-form-field>
+              </div>
+              @if (lossesInfo(); as lost) {
+                <p class="formula" aria-live="polite">Pierdes {{ lost }} unidades por tanda. Su costo ya queda repartido entre las que vendes.</p>
+              }
+            } @else {
+              <p class="muted">Todo lo que registres en los siguientes pasos será para <strong>una unidad</strong>.</p>
+            }
+            <div class="explain">
+              <p><strong>Sobre las pérdidas.</strong> Si en los materiales pones lo que realmente consumes (incluido lo que se bota o se quema)
+                y aquí pones solo las unidades que puedes vender, las pérdidas ya quedan incluidas en el costo.
+                No hace falta sumar otro porcentaje de desperdicio encima: sería contarlas dos veces.</p>
+            </div>
+          </div>
+          <div class="step-actions"><span></span><button mat-flat-button matStepperNext type="button">Siguiente: materiales</button></div>
+        </mat-step>
+
+        <!-- ============ Paso 2: materiales ============ -->
+        <mat-step label="Materiales">
+          <div class="stack step-body">
+            <h2>¿Qué materiales usas?</h2>
+            <p class="muted">Elige de tu biblioteca o crea uno nuevo. Indica cuánto usas {{ isBatch() ? 'en toda la tanda' : 'en una unidad' }}.</p>
+
+            <div class="stack" formArrayName="materials">
+              @for (line of lines.controls; track line.controls.id.value; let i = $index) {
+                @let lr = lineResult(line);
+                <fieldset class="line-item" [formGroupName]="i">
+                  <legend class="visually-hidden">Material {{ i + 1 }}</legend>
+                  <div class="line-item-row">
+                    <mat-form-field class="grow">
+                      <mat-label>Material</mat-label>
+                      <mat-select formControlName="materialId" (selectionChange)="onMaterialChange(line)">
+                        @for (m of materials(); track m.id) {
+                          <mat-option [value]="m.id">{{ m.name }} · {{ m.purchasePrice | money: cur }} por {{ m.purchaseQuantity }} {{ units[m.unit].short }}</mat-option>
+                        }
+                      </mat-select>
+                      @if (line.controls.materialId.invalid) { <mat-error>Elige un material.</mat-error> }
+                    </mat-form-field>
+                    <mat-form-field class="w-qty">
+                      <mat-label>¿Cuánto necesitas?</mat-label>
+                      <input matInput formControlName="quantity" inputmode="decimal" required />
+                      @if (line.controls.quantity.invalid) { <mat-error>{{ err(line.controls.quantity) }}</mat-error> }
+                    </mat-form-field>
+                    <mat-form-field class="w-unit">
+                      <mat-label>Unidad</mat-label>
+                      <mat-select formControlName="unit">
+                        @for (u of unitsFor(line); track u) { <mat-option [value]="u">{{ units[u].short }}</mat-option> }
+                      </mat-select>
+                    </mat-form-field>
+                    <button mat-icon-button type="button" (click)="removeLine(i)" [attr.aria-label]="'Quitar material ' + (i + 1)"><mat-icon>delete</mat-icon></button>
+                  </div>
+                  <div class="line-item-row" style="align-items:center; justify-content: space-between">
+                    <mat-checkbox formControlName="isEstimated">Cantidad estimada</mat-checkbox>
+                    <span class="line-calc" aria-live="polite">
+                      @if (lr?.error) {
+                        <span class="error-text">{{ lr!.error }}</span>
+                      } @else if (lineFormula(line); as f) {
+                        {{ f }} = <strong>{{ lr?.cost | money: cur : 2 }}</strong>
+                      }
+                    </span>
+                  </div>
+                </fieldset>
+              } @empty {
+                <div class="state card" style="padding:24px">
+                  <p>Aún no agregas materiales.</p>
+                </div>
+              }
+            </div>
+            <div class="actions">
+              <button mat-stroked-button type="button" (click)="addLine()" [disabled]="materials().length === 0"><mat-icon>add</mat-icon> Agregar material de la biblioteca</button>
+              <button mat-button type="button" (click)="createMaterial()"><mat-icon>add_circle</mat-icon> Crear material nuevo</button>
+            </div>
+            @if (materials().length === 0) { <p class="muted small">Tu biblioteca está vacía: crea tu primer material.</p> }
+
+            <mat-checkbox [formControl]="form.controls.lossesAccounted">
+              Las cantidades son lo que realmente consumo, incluido lo que se pierde (recortes, masa que queda en el bol, cera derramada).
+            </mat-checkbox>
+          </div>
+          <div class="step-actions">
+            <button mat-button matStepperPrevious type="button">Anterior</button>
+            <button mat-flat-button matStepperNext type="button">Siguiente: trabajo y otros costos</button>
+          </div>
+        </mat-step>
+
+        <!-- ============ Paso 3: trabajo y costos adicionales ============ -->
+        <mat-step label="Trabajo y otros costos">
+          <div class="stack step-body">
+            <section class="stack" formGroupName="labor" aria-labelledby="trabajo-h">
+              <h2 id="trabajo-h">Tu trabajo</h2>
+              <p class="muted">Tu tiempo también cuesta, aunque no te pagues un sueldo.</p>
+              <div class="row">
+                <mat-form-field>
+                  <mat-label>¿Cuántos minutos le dedicas {{ isBatch() ? 'a la tanda' : 'a una unidad' }}?</mat-label>
+                  <input matInput formControlName="minutes" inputmode="decimal" />
+                  @if (form.controls.labor.controls.minutes.invalid) { <mat-error>{{ err(form.controls.labor.controls.minutes) }}</mat-error> }
+                </mat-form-field>
+                <mat-form-field>
+                  <mat-label>¿Cuánto vale una hora de tu trabajo?</mat-label>
+                  <input matInput formControlName="hourlyRate" inputmode="decimal" />
+                  <mat-hint>Lo que te pagarían por hacerlo, o lo que pagarías a otra persona.</mat-hint>
+                  @if (form.controls.labor.controls.hourlyRate.invalid) { <mat-error>{{ err(form.controls.labor.controls.hourlyRate) }}</mat-error> }
+                </mat-form-field>
+              </div>
+              <div class="line-item-row" style="align-items:center; justify-content: space-between">
+                <mat-checkbox formControlName="isEstimated">Tiempo o valor estimado</mat-checkbox>
+                <span class="formula" aria-live="polite">({{ product()?.laborMinutes }} min ÷ 60) × {{ product()?.laborHourlyRate | money: cur }} = <strong>{{ laborCost() | money: cur }}</strong></span>
+              </div>
+
+              <h2>Gastos compartidos</h2>
+              @if (b.sharedMonthlyAmount === '0') {
+                <p class="muted">
+                  Este negocio no tiene gastos compartidos (arriendo, internet…). Puedes registrarlos con el botón
+                  “Editar negocio” en la <a [routerLink]="['/app/negocios', b.id, 'productos']">página del negocio</a>, o marcar esta categoría como “no aplica” en el checklist.
+                </p>
+              } @else {
+                <mat-slide-toggle formControlName="includeShared">
+                  Sumar a este producto su parte de los gastos compartidos ({{ b.sharedMonthlyAmount | money: cur }} al mes ÷ {{ b.productiveHoursPerMonth | qty }} h de producción = {{ sharedPerHour() | money: cur }} por hora)
+                </mat-slide-toggle>
+                @if (form.controls.labor.controls.includeShared.value) {
+                  <mat-form-field>
+                    <mat-label>¿Cuántos minutos de producción usa {{ isBatch() ? 'la tanda' : 'una unidad' }}?</mat-label>
+                    <input matInput formControlName="productionMinutes" inputmode="decimal" />
+                    <mat-hint>Tiempo total de producción (por ejemplo, incluido el horneado), no solo tu trabajo.</mat-hint>
+                    @if (form.controls.labor.controls.productionMinutes.invalid) { <mat-error>{{ err(form.controls.labor.controls.productionMinutes) }}</mat-error> }
+                  </mat-form-field>
+                  <p class="formula" aria-live="polite">
+                    {{ sharedPerHour() | money: cur }} por hora × {{ product()?.productionMinutes | qty }} min ÷ 60 = <strong>{{ sharedCost() | money: cur }}</strong>
+                  </p>
+                }
+                <div class="explain">
+                  <p>Es una <strong>estimación</strong>: reparte el gasto del mes según las horas que ocupa este producto, no en partes iguales entre todos.
+                    @if (b.sharedExpensesNote) { Incluye: {{ b.sharedExpensesNote }}. }
+                    Si un servicio ya lo registras abajo como costo directo, no lo incluyas también en el gasto mensual.</p>
+                  @if (hasServices() && form.controls.labor.controls.includeShared.value) {
+                    <p class="error-text">Tienes servicios registrados como costo directo: verifica que no estén también en el gasto mensual.</p>
+                  }
+                </div>
+              }
+            </section>
+
+            <section class="stack" formArrayName="costs" aria-labelledby="otros-h">
+              <h2 id="otros-h">Otros costos</h2>
+              <p class="muted">
+                Elige si cada costo se paga <strong>una vez por tanda</strong> (por ejemplo, el gas del horno) o
+                <strong>por cada unidad</strong> (por ejemplo, una bolsa por pan).
+              </p>
+              @for (section of costSections; track section.category) {
+                <div class="stack">
+                  <h3>{{ section.title }}</h3>
+                  <p class="muted small" style="margin:0">{{ section.hint }}</p>
+                  @for (c of costsOf(section.category); track c.form.controls.id.value) {
+                    <fieldset class="line-item" [formGroupName]="c.index">
+                      <legend class="visually-hidden">{{ section.title }}: costo</legend>
+                      <div class="line-item-row">
+                        <mat-form-field class="grow">
+                          <mat-label>¿Qué es?</mat-label>
+                          <input matInput formControlName="name" maxlength="120" [placeholder]="section.example" required />
+                          @if (c.form.controls.name.invalid) { <mat-error>{{ err(c.form.controls.name) }}</mat-error> }
+                        </mat-form-field>
+                        <mat-form-field class="w-qty">
+                          <mat-label>¿Cuánto cuesta?</mat-label>
+                          <input matInput formControlName="amount" inputmode="decimal" required />
+                          @if (c.form.controls.amount.invalid) { <mat-error>{{ err(c.form.controls.amount) }}</mat-error> }
+                        </mat-form-field>
+                        <button mat-icon-button type="button" (click)="removeCost(c.index)" [attr.aria-label]="'Quitar ' + (c.form.controls.name.value || 'costo')"><mat-icon>delete</mat-icon></button>
+                      </div>
+                      <div class="line-item-row" style="align-items:center">
+                        <mat-button-toggle-group formControlName="scope" [attr.aria-label]="'¿Cada cuánto se paga ' + (c.form.controls.name.value || 'este costo') + '?'">
+                          <mat-button-toggle value="batch">{{ isBatch() ? 'Por tanda' : 'Una vez' }}</mat-button-toggle>
+                          <mat-button-toggle value="unit">Por unidad</mat-button-toggle>
+                        </mat-button-toggle-group>
+                        <mat-checkbox formControlName="isEstimated">Estimado</mat-checkbox>
+                      </div>
+                    </fieldset>
+                  }
+                  <div><button mat-button type="button" (click)="addCost(section.category)"><mat-icon>add</mat-icon> Agregar {{ section.title.toLowerCase() }}</button></div>
+                </div>
+              }
+            </section>
+          </div>
+          <div class="step-actions">
+            <button mat-button matStepperPrevious type="button">Anterior</button>
+            <button mat-flat-button matStepperNext type="button">Siguiente: checklist</button>
+          </div>
+        </mat-step>
+
+        <!-- ============ Paso 4: checklist ============ -->
+        <mat-step label="Checklist">
+          <div class="stack step-body" formGroupName="checklist">
+            <h2>¿Se te olvidó algo?</h2>
+            <p class="muted">
+              Revisa cada categoría. Solo puede estar “incluida” si tiene datos en el costeo; si no aplica a tu producto, márcala como “no aplica”.
+            </p>
+            @for (cat of checklistCategories; track cat) {
+              @let item = checklistItem(cat);
+              <div class="checklist-card" [class.is-pending]="item?.status === 'pending'">
+                <div>
+                  <h3 style="margin:0" [id]="'cl-' + cat">{{ checklistLabels[cat] }}
+                    @if (item?.isEstimated) { <span class="tag-est">estimado</span> }
+                  </h3>
+                  <p class="small muted" style="margin:0">{{ checklistHelp[cat].text }}</p>
+                  <p class="small" style="margin:4px 0 0">
+                    <strong>{{ item?.status === 'included' ? 'Incluida' : item?.status === 'not_applicable' ? 'No aplica' : 'Pendiente' }}</strong>
+                    · {{ item?.summary }}
+                    @if (!item?.hasData && item?.status !== 'not_applicable') {
+                      · <button type="button" class="link-button" (click)="goToStep(checklistHelp[cat].step)">Agregar datos</button>
+                    }
+                  </p>
+                </div>
+                <mat-button-toggle-group [formControlName]="cat" [attr.aria-labelledby]="'cl-' + cat">
+                  <mat-button-toggle value="pending" [disabled]="item?.hasData">Pendiente</mat-button-toggle>
+                  <mat-button-toggle value="included" [disabled]="!item?.hasData" [attr.title]="item?.hasData ? null : 'Agrega datos para poder incluirla'">Incluida</mat-button-toggle>
+                  <mat-button-toggle value="not_applicable">No aplica</mat-button-toggle>
+                </mat-button-toggle-group>
+              </div>
+            }
+          </div>
+          <div class="step-actions">
+            <button mat-button matStepperPrevious type="button">Anterior</button>
+            <button mat-flat-button matStepperNext type="button">Siguiente: margen y resultado</button>
+          </div>
+        </mat-step>
+
+        <!-- ============ Paso 5: margen y resultado ============ -->
+        <mat-step label="Margen y resultado">
+          <div class="stack step-body" formGroupName="pricing">
+            <h2>¿A qué precio vender?</h2>
+            <div>
+              <p id="precio-modo"><strong>¿Cómo quieres calcular el precio?</strong></p>
+              <mat-button-toggle-group formControlName="mode" aria-labelledby="precio-modo">
+                <mat-button-toggle value="margin">Margen sobre la venta</mat-button-toggle>
+                <mat-button-toggle value="markup">Recargo sobre el costo</mat-button-toggle>
+              </mat-button-toggle-group>
+            </div>
+            @if (form.controls.pricing.controls.mode.value === 'margin') {
+              <div class="explain">
+                <p><strong>Margen sobre la venta:</strong> de cada $100 que cobras, ¿cuántos quieres que te queden de ganancia?
+                  Con 30 %, de cada $100 te quedan $30 después de costos y comisiones.</p>
+              </div>
+              <mat-form-field>
+                <mat-label>Margen objetivo (%)</mat-label>
+                <input matInput formControlName="targetMargin" inputmode="decimal" />
+                <span matTextSuffix>%</span>
+                @if (form.controls.pricing.controls.targetMargin.invalid) { <mat-error>{{ err(form.controls.pricing.controls.targetMargin) }}</mat-error> }
+              </mat-form-field>
+            } @else {
+              <div class="explain">
+                <p><strong>Recargo sobre el costo:</strong> ¿cuánto le sumas a lo que te cuesta? Con 50 %, algo que cuesta $100 se vende en $150.
+                  El recargo se aplica <strong>antes</strong> de descontar la comisión, así que tu margen real será menor; lo verás abajo como “margen efectivo”.</p>
+              </div>
+              <mat-form-field>
+                <mat-label>Recargo sobre el costo (%)</mat-label>
+                <input matInput formControlName="markup" inputmode="decimal" />
+                <span matTextSuffix>%</span>
+                @if (form.controls.pricing.controls.markup.invalid) { <mat-error>{{ err(form.controls.pricing.controls.markup) }}</mat-error> }
+              </mat-form-field>
+            }
+
+            <h3>Comisiones de venta</h3>
+            <div class="row">
+              <mat-form-field>
+                <mat-label>Comisión sobre el precio de venta (%)</mat-label>
+                <input matInput formControlName="commission" inputmode="decimal" />
+                <span matTextSuffix>%</span>
+                <mat-hint>Por ejemplo, lo que cobra una app o el datáfono.</mat-hint>
+                @if (form.controls.pricing.controls.commission.invalid) { <mat-error>{{ err(form.controls.pricing.controls.commission) }}</mat-error> }
+              </mat-form-field>
+              <mat-form-field>
+                <mat-label>Cargo fijo de venta por unidad</mat-label>
+                <input matInput formControlName="fixedFee" inputmode="decimal" />
+                <mat-hint>Lo que te cobran por <strong>cada unidad</strong> vendida (no por pedido).</mat-hint>
+                @if (form.controls.pricing.controls.fixedFee.invalid) { <mat-error>{{ err(form.controls.pricing.controls.fixedFee) }}</mat-error> }
+              </mat-form-field>
+            </div>
+
+            <h3>Precio comercial</h3>
+            <div class="row">
+              <mat-form-field>
+                <mat-label>Redondear hacia arriba a</mat-label>
+                <mat-select formControlName="rounding">
+                  <mat-option value="none">Sin redondeo</mat-option>
+                  <mat-option value="50">Múltiplos de $50</mat-option>
+                  <mat-option value="100">Múltiplos de $100</mat-option>
+                  <mat-option value="500">Múltiplos de $500</mat-option>
+                  <mat-option value="1000">Múltiplos de $1.000</mat-option>
+                  <mat-option value="custom">Otro valor…</mat-option>
+                </mat-select>
+              </mat-form-field>
+              @if (form.controls.pricing.controls.rounding.value === 'custom') {
+                <mat-form-field>
+                  <mat-label>Múltiplo para redondear</mat-label>
+                  <input matInput formControlName="customRounding" inputmode="decimal" />
+                  @if (form.controls.pricing.controls.customRounding.invalid) { <mat-error>{{ err(form.controls.pricing.controls.customRounding) }}</mat-error> }
+                </mat-form-field>
+              }
+            </div>
+
+            <h3>Simulador</h3>
+            <mat-form-field>
+              <mat-label>¿Y si lo vendo a…? (opcional)</mat-label>
+              <input matInput formControlName="manualPrice" inputmode="decimal" />
+              <mat-hint>Escribe un precio para ver tu ganancia y margen con ese valor.</mat-hint>
+              @if (form.controls.pricing.controls.manualPrice.invalid) { <mat-error>{{ err(form.controls.pricing.controls.manualPrice) }}</mat-error> }
+            </mat-form-field>
+
+            @if (r) {
+              <h2>Resultado</h2>
+              <app-costing-result-view [result]="r" [currency]="cur" [mode]="product()!.costingMode" />
+            }
+          </div>
+          <div class="step-actions">
+            <button mat-button matStepperPrevious type="button">Anterior</button>
+            <div class="actions">
+              <button mat-stroked-button type="button" (click)="save()" [disabled]="saving()">Guardar</button>
+              <button mat-flat-button type="button" (click)="save(true)" [disabled]="saving()"><mat-icon>description</mat-icon> Guardar y ver reporte</button>
+            </div>
+          </div>
+        </mat-step>
+      </mat-stepper>
+    </form>
+
+    <aside class="card live-summary" aria-label="Resumen del costeo">
+      <h2 style="font-size:1.05rem">Resumen en vivo</h2>
+      @if (r) {
+        <div class="summary-figure"><span>Costo por unidad</span><strong>{{ r.unitCost | money: cur }}</strong></div>
+        @if (isBatch()) { <div class="summary-figure"><span>Costo de la tanda</span><strong>{{ r.batchTotal | money: cur }}</strong></div> }
+        <div class="summary-figure">
+          <span>Precio sugerido{{ r.pendingCategories.length ? ' (provisional)' : '' }}</span>
+        </div>
+        <div class="summary-price" aria-live="polite">{{ price() | money: cur }}</div>
+        @if (r.pricing) {
+          @let out = r.pricing.rounded ?? r.pricing.calculated;
+          <p class="small muted" style="margin:0">Ganancia estimada: {{ out.profit | money: cur }} por unidad · margen {{ out.effectiveMargin | pct }}</p>
+        }
+        <p class="small muted">Antes de impuestos.</p>
+        <app-status-chip [status]="r.status" />
+        @if (r.errors.length) { <p class="error-text small">Hay {{ r.errors.length }} datos por corregir.</p> }
+        @if (r.pendingCategories.length) {
+          <p class="small" style="margin-top:8px"><strong>Falta revisar:</strong></p>
+          <ul class="small" style="margin:0; padding-left: 1.1rem">
+            @for (c of r.pendingCategories; track c) {
+              <li><button type="button" class="link-button" (click)="goToStep(checklistHelp[c].step)">{{ checklistLabels[c] }}</button></li>
+            }
+          </ul>
+        }
+      }
+    </aside>
+  </div>
+}

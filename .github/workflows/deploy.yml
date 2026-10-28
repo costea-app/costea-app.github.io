@@ -1,0 +1,53 @@
+# Compila, prueba y publica Costea en GitHub Pages en cada push a main.
+# Se ejecuta en los servidores de GitHub (no en tu computador).
+name: Publicar en GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Pruebas
+        run: npm test
+      - name: Compilar
+        env:
+          # Configuración PÚBLICA de Supabase: la URL y la clave publicable están hechas para el
+          # navegador (la seguridad está en las políticas RLS). Nunca pongas aquí claves secretas.
+          SUPABASE_URL: https://mspqsijvwbmnagehanrn.supabase.co
+          SUPABASE_PUBLISHABLE_KEY: sb_publishable_89XQAjOoN9TCaUScSDNkqg_dI3MNw6r
+          # Repositorio "usuario.github.io" → raíz; cualquier otro → /<nombre-del-repo>/
+          BASE_HREF: ${{ endsWith(github.event.repository.name, '.github.io') && '/' || format('/{0}/', github.event.repository.name) }}
+        run: npm run build:pages
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist/costea/browser
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
