@@ -1,0 +1,32 @@
+name: Mantener Supabase activo
+
+# El plan gratuito de Supabase pausa el proyecto tras ~7 días sin actividad.
+# Este workflow hace una consulta a la base de datos cada 3 días para evitarlo.
+on:
+  schedule:
+    - cron: '0 9 */3 * *'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Consultar la API REST
+        env:
+          # Configuración PÚBLICA (la misma que en deploy.yml). Nunca pongas aquí claves secretas.
+          SUPABASE_URL: https://mspqsijvwbmnagehanrn.supabase.co
+          SUPABASE_PUBLISHABLE_KEY: sb_publishable_89XQAjOoN9TCaUScSDNkqg_dI3MNw6r
+        run: |
+          # anon no tiene acceso a las tablas, así que un 401/403 es lo esperado: la consulta
+          # llega igualmente a Postgres y cuenta como actividad. Solo falla si no hay respuesta
+          # o hay un error de servidor (proyecto pausado o caído).
+          status=$(curl -s -o /dev/null -w '%{http_code}' -m 30 --retry 3 \
+            -H "apikey: $SUPABASE_PUBLISHABLE_KEY" \
+            "$SUPABASE_URL/rest/v1/businesses?select=id&limit=1" || true)
+          echo "HTTP $status"
+          if [ "$status" = "000" ] || [ "$status" -ge 500 ]; then
+            echo "::error::Supabase no responde (HTTP $status). ¿Está pausado? Restáuralo desde el dashboard."
+            exit 1
+          fi
