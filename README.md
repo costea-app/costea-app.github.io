@@ -114,7 +114,8 @@ no se envían correos (sin confirmación de cuenta ni recuperación de contrase�
 
 1. Crea un proyecto en <https://supabase.com> (plan gratuito, sin tarjeta).
 2. **SQL Editor → New query**: ejecuta, en orden y cada uno completo, los archivos de `supabase/migrations/`
-   (`20261027000001_costea_schema.sql` y luego `20261028000002_production_schedule.sql`).
+   (`20261027000001_costea_schema.sql`, `20261028000002_production_schedule.sql` y
+   `20261112000003_keep_alive.sql`).
    (Alternativa: `npx supabase link --project-ref <ref>` y `npx supabase db push`.)
    No ejecutes los archivos de `supabase/tests/`.
 3. **Authentication → Sign In / Providers → Email**: deja el proveedor habilitado y **desactiva
@@ -124,6 +125,11 @@ no se envían correos (sin confirmación de cuenta ni recuperación de contrase�
    `scripts/write-config.mjs` las rechaza.
 
 No hace falta configurar Site URL, Redirect URLs, plantillas de correo ni SMTP.
+
+**Pausa por inactividad:** el plan gratuito pausa el proyecto tras ~7 días sin uso. El workflow
+`.github/workflows/keep-alive.yml` llama a `public.keep_alive()` cada 3 días para evitarlo y falla
+(con aviso por correo de GitHub) si no recibe un 200. Si el proyecto se pausa, restáuralo desde el
+dashboard (**Restore project**).
 
 ---
 

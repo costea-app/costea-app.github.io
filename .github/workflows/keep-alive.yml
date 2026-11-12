@@ -19,14 +19,13 @@ jobs:
           SUPABASE_URL: https://mspqsijvwbmnagehanrn.supabase.co
           SUPABASE_PUBLISHABLE_KEY: sb_publishable_89XQAjOoN9TCaUScSDNkqg_dI3MNw6r
         run: |
-          # anon no tiene acceso a las tablas, así que un 401/403 es lo esperado: la consulta
-          # llega igualmente a Postgres y cuenta como actividad. Solo falla si no hay respuesta
-          # o hay un error de servidor (proyecto pausado o caído).
-          status=$(curl -s -o /dev/null -w '%{http_code}' -m 30 --retry 3 \
-            -H "apikey: $SUPABASE_PUBLISHABLE_KEY" \
-            "$SUPABASE_URL/rest/v1/businesses?select=id&limit=1" || true)
-          echo "HTTP $status"
-          if [ "$status" = "000" ] || [ "$status" -ge 500 ]; then
-            echo "::error::Supabase no responde (HTTP $status). ¿Está pausado? Restáuralo desde el dashboard."
+          # public.keep_alive() (migración 20261112000003) solo devuelve now(): la consulta
+          # llega a Postgres y termina bien. Cualquier respuesta distinta de 200 hace fallar el job.
+          status=$(curl -s -o /tmp/body -w '%{http_code}' -m 30 --retry 3 \
+            -X POST -H "apikey: $SUPABASE_PUBLISHABLE_KEY" -H "Content-Type: application/json" \
+            -d '{}' "$SUPABASE_URL/rest/v1/rpc/keep_alive" || true)
+          echo "HTTP $status: $(head -c 300 /tmp/body 2>/dev/null)"
+          if [ "$status" != "200" ]; then
+            echo "::error::Supabase no respondió 200 (HTTP $status). ¿Está pausado o falta la migración keep_alive?"
             exit 1
           fi

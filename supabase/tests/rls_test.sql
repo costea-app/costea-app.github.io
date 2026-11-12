@@ -248,6 +248,8 @@ select set_config('request.jwt.claims', '', false);
 select tests.expect_error('anon no puede leer negocios', 'select * from public.businesses', 'permission denied');
 select tests.expect_error('anon no puede ejecutar save_product',
   $q$select public.save_product('{}'::jsonb)$q$, 'permission denied');
+select tests.expect_eq('anon puede ejecutar keep_alive',
+  (select count(*) from (select public.keep_alive()) as k), 1);
 reset role;
 
 -- Comprobación final como superusuario: los datos de A siguen intactos
